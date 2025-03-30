@@ -1,53 +1,79 @@
-from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments
-from datasets import load_dataset
+import json
+import torch
+from torch.utils.data import DataLoader, Dataset
+from transformers import T5Tokenizer, T5ForConditionalGeneration, Trainer, TrainingArguments
 
-def main():
-    # Load the MRPC dataset from GLUE
-    dataset = load_dataset("glue", "mrpc")
+# Custom Dataset Class
+class CustomDataset(Dataset):
+    def __init__(self, json_file, tokenizer, max_len):
+        with open(json_file, 'r') as f:
+            self.data = json.load(f)  # Load the entire JSON file as a list of objects
+        self.tokenizer = tokenizer
+        self.max_len = max_len
 
-    # Load the pre-trained BERT tokenizer and model
-    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-    model = BertForSequenceClassification.from_pretrained("bert-base-uncased")
+    def __len__(self):
+        return len(self.data)
 
-    # Define a function to tokenize the input data
-    def tokenize_function(examples):
-        return tokenizer(
-            examples["sentence1"],
-            examples["sentence2"],
-            truncation=True,
-            padding="max_length",
-            max_length=128
+    def __getitem__(self, index):
+        item = self.data[index]
+        input_text = f"{item['instruction']} {item['input']}"
+        labels_text = item['output']
+
+        inputs = self.tokenizer.encode_plus(
+            input_text,
+            None,
+            add_special_tokens=True,
+            max_length=self.max_len,
+            padding='max_length',
+            return_token_type_ids=True,
+            truncation=True
         )
+        labels = self.tokenizer.encode_plus(
+            labels_text,
+            None,
+            add_special_tokens=True,
+            max_length=self.max_len,
+            padding='max_length',
+            return_token_type_ids=True,
+            truncation=True
+        )
+        return {
+            'input_ids': torch.tensor(inputs['input_ids'], dtype=torch.long),
+            'attention_mask': torch.tensor(inputs['attention_mask'], dtype=torch.long),
+            'labels': torch.tensor(labels['input_ids'], dtype=torch.long)
+        }
 
-    # Apply tokenization to the dataset
-    tokenized_dataset = dataset.map(tokenize_function, batched=True)
+# Load the tokenizer
+tokenizer = T5Tokenizer.from_pretrained('t5-small')
 
-    # Define training arguments
-    training_args = TrainingArguments(
-        output_dir="./results",
-        evaluation_strategy="epoch",
-        learning_rate=2e-5,
-        per_device_train_batch_size=16,
-        per_device_eval_batch_size=16,
-        num_train_epochs=3,
-        weight_decay=0.01,
-        logging_dir="./logs"
-    )
+# Load the dataset
+train_dataset = CustomDataset('/home/alucard/venv/Psychology-10K.json', tokenizer, max_len=128)
+train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
 
-    # Initialize the Trainer
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=tokenized_dataset["train"],
-        eval_dataset=tokenized_dataset["validation"]
-    )
+# Load the pre-trained model
+model = T5ForConditionalGeneration.from_pretrained('t5-small')
 
-    # Fine-tune the model
-    trainer.train()
+# Set up training arguments
+training_args = TrainingArguments(
+    output_dir='./results',
+    num_train_epochs=3,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
+    warmup_steps=500,
+    weight_decay=0.01,
+    logging_dir='./logs'
+)
 
-    # Save the fine-tuned model and tokenizer
-    model.save_pretrained("./fine_tuned_bert")
-    tokenizer.save_pretrained("./fine_tuned_bert")
+# Initialize Trainer
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset
+)
 
-if __name__ == "__main__":
-    main()
+# Fine-tune the model
+trainer.train()
+
+# Save the model
+model.save_pretrained('./finetuned_t5')
+tokenizer.save_pretrained('./finetuned_t5')
