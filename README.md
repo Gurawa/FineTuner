@@ -29,10 +29,10 @@ The goal of this project is to fine-tune the T5-small model to provide helpful r
 
 ### Fine-tuning the Model
 
-To fine-tune the T5-small model, run the `finetune_t5.py` script:
+To fine-tune the T5-small model, run the `FineTuner.py` script:
 
 ```bash
-python finetune_t5.py
+python FineTuner.py
 ```
 
 This script will load the dataset, fine-tune the model, and save the fine-tuned model in the `./finetuned_t5` directory.
